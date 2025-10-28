@@ -1,0 +1,164 @@
+-- CUSTOMERS THAT ARE NOT IN THE BD: 10
+
+SELECT 
+  c.cod_cliente
+FROM BD_Clientes.BD_Convite AS c
+LEFT JOIN BD_Clientes.BD_Historico AS h
+  ON c.cod_cliente = h.cod_cliente
+WHERE h.cod_cliente IS NULL;
+
+
+--- ENGAGED CUSTOMERS
+--- REGION ADDED
+
+WITH base_convite_completa AS (
+  SELECT 
+    c.cod_cliente,
+    h.dt_criacao_conta,
+    h.des_status_pedido,
+    h.estado,
+    CASE
+      WHEN h.estado IN ('SP','MG','ES','RJ') THEN "Sudeste"
+      WHEN h.estado IN ('RS','PR','SC') THEN "Sul"
+      WHEN h.estado IN ('DF','GO','MT','MS') THEN "Centro Oeste"
+      WHEN h.estado IN ('AC','AP','AM','PA','RO','RR','TO') THEN "Norte"
+      WHEN h.estado IN ('BA','AL','CE','MA','PB','PE','PI','RN','SE') THEN "Nordeste"
+      ELSE "Outro"
+    END AS regiao,
+    h.dt_criacao_pedido,
+    h.des_canal_venda,
+    h.cod_pedido,
+    h.vlr_pagamento,
+    h.ultimo_acesso,
+    h.qt_sessoes_historico,
+    h.sum_acessos_6meses,
+    h.sum_acessos_ultimo_mes,
+    h.flg_cliente_ativo_gb_6meses,
+    h.flg_cliente_ativo_gb_mes_atual,
+    h.flg_cliente_ativo_digital_6meses,
+    h.flg_cliente_ativo_digital_mes_atual
+  FROM `BD_Clientes.BD_Convite` AS c
+  INNER JOIN `BD_Clientes.BD_Historico` AS h
+    ON c.cod_cliente = h.cod_cliente
+),
+
+clientes_engajados AS (
+  SELECT
+    cod_cliente,
+    CASE
+      WHEN MAX(flg_cliente_ativo_gb_mes_atual) = 1
+       AND MAX(flg_cliente_ativo_gb_6meses) = 1
+       AND MAX(flg_cliente_ativo_digital_mes_atual) = 1
+       AND MAX(flg_cliente_ativo_digital_6meses) = 1
+       AND MAX(CASE WHEN sum_acessos_ultimo_mes >= 10 THEN 1 ELSE 0 END) = 1
+       AND MAX(CASE WHEN sum_acessos_6meses >= 60 THEN 1 ELSE 0 END) = 1
+      THEN 1
+      ELSE 0
+    END AS engajado
+  FROM base_convite_completa
+  GROUP BY cod_cliente
+)
+
+SELECT
+  b.cod_cliente,
+  b.dt_criacao_conta,
+  b.des_status_pedido,
+  b.estado,
+  b.regiao,
+  b.dt_criacao_pedido,
+  b.des_canal_venda,
+  b.cod_pedido,
+  b.vlr_pagamento,
+  b.ultimo_acesso,
+  b.qt_sessoes_historico,
+  b.sum_acessos_6meses,
+  b.sum_acessos_ultimo_mes,
+  b.flg_cliente_ativo_gb_6meses,
+  b.flg_cliente_ativo_gb_mes_atual,
+  b.flg_cliente_ativo_digital_6meses,
+  b.flg_cliente_ativo_digital_mes_atual,
+  e.engajado
+FROM base_convite_completa b
+INNER JOIN clientes_engajados e
+  ON b.cod_cliente = e.cod_cliente
+ORDER BY b.cod_cliente, b.dt_criacao_pedido;
+
+
+---- CLUSTERS AT THE ENGAGED CUSTOMERS:
+
+WITH base_engajada AS (
+  SELECT 
+    cod_cliente,
+    estado,
+    CASE
+      WHEN estado IN ('SP','MG','ES','RJ') THEN "Sudeste"
+      WHEN estado IN ('RS','PR','SC') THEN "Sul"
+      WHEN estado IN ('DF','GO','MT','MS') THEN "Centro Oeste"
+      WHEN estado IN ('AC','AP','AM','PA','RO','RR','TO') THEN "Norte"
+      WHEN estado IN ('BA','AL','CE','MA','PB','PE','PI','RN','SE') THEN "Nordeste"
+      ELSE "Outro"
+    END AS regiao,
+    MIN(dt_criacao_pedido) AS primeira_compra,
+    MAX(dt_criacao_pedido) AS ultima_compra,
+    COUNT(DISTINCT cod_pedido) AS qtde_pedidos,
+    SUM(vlr_pagamento) AS valor_total
+  FROM `BD_Clientes.BD_Consolidado_convite`
+  WHERE engajado = 1
+    AND dt_criacao_pedido >= '2023-10-01'
+  GROUP BY cod_cliente, estado
+),
+
+base_clusterizada AS (
+  SELECT 
+    *,
+    CASE
+      WHEN valor_total <= 3721787 THEN 'Baixo'
+      WHEN valor_total > 3721787 AND valor_total <= 7877092 THEN 'Médio'
+      ELSE 'Alto'
+    END AS faixa_valor
+  FROM base_engajada
+)
+
+SELECT 
+  cod_cliente,
+  estado,
+  regiao,
+  primeira_compra,
+  ultima_compra,
+  qtde_pedidos,
+  valor_total,
+  faixa_valor
+FROM base_clusterizada
+ORDER BY valor_total DESC;
+
+
+
+-- UNIQUE ACCESS PER CUSTOMER
+SELECT
+  c.cod_cliente,
+  h.estado AS estado,
+  CASE
+    WHEN h.estado IN ('SP','MG','ES','RJ') THEN "Sudeste"
+    WHEN h.estado IN ('RS','PR','SC') THEN "Sul"
+    WHEN h.estado IN ('DF','GO','MT','MS') THEN "Centro Oeste"
+    WHEN h.estado IN ('AC','AP','AM','PA','RO','RR','TO') THEN "Norte"
+    WHEN h.estado IN ('BA','AL','CE','MA','PB','PE','PI','RN','SE') THEN "Nordeste"
+    ELSE "Outro"
+  END AS regiao,
+  h.qt_sessoes_historico,
+  h.sum_acessos_6meses,
+  h.sum_acessos_ultimo_mes
+FROM `BD_Clientes.BD_Convite` AS c
+INNER JOIN `BD_Clientes.BD_Historico` AS h
+  ON c.cod_cliente = h.cod_cliente
+GROUP BY
+  c.cod_cliente,
+  h.estado,
+  h.qt_sessoes_historico,
+  h.sum_acessos_6meses,
+  h.sum_acessos_ultimo_mes
+ORDER BY c.cod_cliente;
+
+
+
+
